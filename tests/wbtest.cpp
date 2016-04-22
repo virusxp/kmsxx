@@ -659,7 +659,7 @@ int main(int argc, char **argv)
 	unsigned disp_h = 600;
 
 	/* let's setup default values before parsing arguments */
-	string devname = "";
+	string devname = "/dev/video10";
 	string srcfile = "";
 	string dstfile = "";
 	unsigned int sf_w = 0, sf_h = 0, df_w = 0, df_h = 0;
