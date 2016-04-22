@@ -708,12 +708,10 @@ int main(int argc, char **argv)
 				usage();
 				exit(1);
 			}
-			printf("device_name: %s\n", devname.c_str());
 			break;
 		case 'i':
 		case 'I':
 			srcfile = optarg;
-			printf("srcfile: %s\n", srcfile.c_str());
 			fin = open(srcfile.c_str(), O_RDONLY);
 
 			/* File name parsing */
@@ -753,7 +751,6 @@ int main(int argc, char **argv)
 		case 'o':
 		case 'O':
 			dstfile = optarg;
-			printf("dstfile: %s\n", dstfile.c_str());
 			fout = open(dstfile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
 			/* File name parsing */
@@ -843,8 +840,12 @@ int main(int argc, char **argv)
 		}
 	}
 
-	dprintf("in  %dx%d '%s'\n", src_w, src_h, src_fourcc.c_str());
-	dprintf("out %dx%d '%s'\n", dst_w, dst_h, dst_fourcc.c_str());
+	printf("WB device: %s\n", devname.c_str());
+	printf("Src file : %s (%dx%d '%s')\n", srcfile.c_str(), src_w, src_h,
+	       src_fourcc.c_str());
+	printf("Dst file : %s (%dx%d '%s')\n", dstfile.c_str(), dst_w, dst_h,
+	       dst_fourcc.c_str());
+
 	for (unsigned i = 0; i < NUMBUF; ++i) {
 		srcfb[i] = new DumbFramebuffer(card, src_w, src_h, FourCCToPixelFormat(src_fourcc));
 		draw_test_pattern(*srcfb[i]);
