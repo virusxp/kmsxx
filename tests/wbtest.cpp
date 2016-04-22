@@ -542,6 +542,9 @@ static int display_buffer(Crtc *crtc, unsigned disp_w, unsigned disp_h, DumbFram
 
 	Plane* plane = 0;
 
+	if (!crtc)
+		return 0;
+
 	for (Plane* p : crtc->get_possible_planes()) {
 		if (p->plane_type() == PlaneType::Overlay) {
 			plane = p;
@@ -641,11 +644,9 @@ int main(int argc, char **argv)
 	int	fin = -1, fout = -1;
 	unsigned int	num_frames_convert = -1UL;
 	DumbFramebuffer *srcfb[NUMBUF], *dstfb[NUMBUF];
-
+	Connector *conn = NULL;
+	Crtc *crtc = NULL;
 	Card card;
-
-	auto conn = card.get_first_connected_connector();
-	auto crtc = conn->get_current_crtc();
 
 	unsigned src_w = 800;
 	unsigned src_h = 600;
@@ -853,15 +854,20 @@ int main(int argc, char **argv)
 		dstfb[i] = new DumbFramebuffer(card, dst_w, dst_h, FourCCToPixelFormat(dst_fourcc));
 	}
 
-	if (crtc->width() < dst_w)
-		disp_w = crtc->width();
-	else
-		disp_w = dst_w;
+	if (display_on) {
+		conn = card.get_first_connected_connector();
+		crtc = conn->get_current_crtc();
 
-	if (crtc->height() < dst_h)
-		disp_h = crtc->width();
-	else
-		disp_h = dst_h;
+		if (crtc->width() < dst_w)
+			disp_w = crtc->width();
+		else
+			disp_w = dst_w;
+
+		if (crtc->height() < dst_h)
+			disp_h = crtc->width();
+		else
+			disp_h = dst_h;
+	}
 
 	/*
 	 * If there is no input file and the number of wanted
