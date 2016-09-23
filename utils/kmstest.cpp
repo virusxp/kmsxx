@@ -32,10 +32,9 @@ struct OutputInfo
 	Connector* connector;
 
 	Crtc* crtc;
-	Plane* primary_plane;
 	Videomode mode;
 	bool user_set_crtc;
-	vector<MappedFramebuffer*> fbs;
+	PlaneInfo primary_plane;
 
 	vector<PlaneInfo> planes;
 };
@@ -389,7 +388,7 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 			output.crtc = pipe.crtc;
 			output.mode = output.connector->get_default_mode();
 
-			output.fbs = get_default_fb(card, output.mode.hdisplay, output.mode.vdisplay);
+			output.primary_plane.fbs = get_default_fb(card, output.mode.hdisplay, output.mode.vdisplay);
 
 			outputs.push_back(output);
 		}
@@ -481,7 +480,7 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 			if (current_plane)
 				current_plane->fbs = fbs;
 			else
-				current_output->fbs = fbs;
+				current_output->primary_plane.fbs = fbs;
 
 			break;
 		}
@@ -495,8 +494,8 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 			o.user_set_crtc = true;
 		}
 
-		if (o.fbs.empty() && o.user_set_crtc)
-			o.fbs = get_default_fb(card, o.mode.hdisplay, o.mode.vdisplay);
+		if (o.primary_plane.fbs.empty() && o.user_set_crtc)
+			o.primary_plane.fbs = get_default_fb(card, o.mode.hdisplay, o.mode.vdisplay);
 
 		for (PlaneInfo &p : o.planes) {
 			if (p.fbs.empty())
@@ -529,11 +528,11 @@ static void print_outputs(const vector<OutputInfo>& outputs)
 		printf("Connector %u/@%u: %s\n", o.connector->idx(), o.connector->id(),
 		       o.connector->fullname().c_str());
 		printf("  Crtc %u/@%u", o.crtc->idx(), o.crtc->id());
-		if (o.primary_plane)
-			printf(" (plane %u/@%u)", o.primary_plane->idx(), o.primary_plane->id());
+		if (o.primary_plane.plane)
+			printf(" (plane %u/@%u)", o.primary_plane.plane->idx(), o.primary_plane.plane->id());
 		printf(": %s\n", videomode_to_string(o.mode).c_str());
-		if (!o.fbs.empty()) {
-			auto fb = o.fbs[0];
+		if (!o.primary_plane.fbs.empty()) {
+			auto fb = o.primary_plane.fbs[0];
 			printf("    Fb %u %ux%u-%s\n", fb->id(), fb->width(), fb->height(),
 			       PixelFormatToFourCC(fb->format()).c_str());
 		}
@@ -552,7 +551,7 @@ static void print_outputs(const vector<OutputInfo>& outputs)
 static void draw_test_patterns(const vector<OutputInfo>& outputs)
 {
 	for (const OutputInfo& o : outputs) {
-		for (auto fb : o.fbs)
+		for (auto fb : o.primary_plane.fbs)
 			draw_test_pattern(*fb);
 
 		for (const PlaneInfo& p : o.planes)
@@ -567,8 +566,8 @@ static void set_crtcs_n_planes_legacy(Card& card, const vector<OutputInfo>& outp
 		auto conn = o.connector;
 		auto crtc = o.crtc;
 
-		if (!o.fbs.empty()) {
-			auto fb = o.fbs[0];
+		if (!o.primary_plane.fbs.empty()) {
+			auto fb = o.primary_plane.fbs[0];
 			int r = crtc->set_mode(conn, *fb, o.mode);
 			if (r)
 				printf("crtc->set_mode() failed for crtc %u: %s\n",
@@ -598,8 +597,8 @@ static void set_crtcs_n_planes(Card& card, const vector<OutputInfo>& outputs)
 		auto conn = o.connector;
 		auto crtc = o.crtc;
 
-		if (!o.fbs.empty()) {
-			auto fb = o.fbs[0];
+		if (!o.primary_plane.fbs.empty()) {
+			auto fb = o.primary_plane.fbs[0];
 
 			blobs.emplace_back(o.mode.to_blob(card));
 			Blob* mode_blob = blobs.back().get();
@@ -613,7 +612,7 @@ static void set_crtcs_n_planes(Card& card, const vector<OutputInfo>& outputs)
 					{ "MODE_ID", mode_blob->id() },
 				});
 
-			req.add(o.primary_plane, {
+			req.add(o.primary_plane.plane, {
 					{ "FB_ID", fb->id() },
 					{ "CRTC_ID", crtc->id() },
 					{ "SRC_X", 0 << 16 },
@@ -716,12 +715,12 @@ private:
 	{
 		unsigned cur = frame_num % s_num_buffers;
 
-		if (!o.fbs.empty()) {
-			auto fb = o.fbs[cur];
+		if (!o.primary_plane.fbs.empty()) {
+			auto fb = o.primary_plane.fbs[cur];
 
 			draw_bar(fb, frame_num);
 
-			req.add(o.primary_plane, {
+			req.add(o.primary_plane.plane, {
 					{ "FB_ID", fb->id() },
 				});
 		}
@@ -741,8 +740,8 @@ private:
 	{
 		unsigned cur = frame_num % s_num_buffers;
 
-		if (!o.fbs.empty()) {
-			auto fb = o.fbs[cur];
+		if (!o.primary_plane.fbs.empty()) {
+			auto fb = o.primary_plane.fbs[cur];
 
 			draw_bar(fb, frame_num);
 
@@ -855,9 +854,9 @@ int main(int argc, char **argv)
 
 	if (card.has_atomic()) {
 		for (OutputInfo& o : outputs) {
-			o.primary_plane = o.crtc->get_primary_plane();
+			o.primary_plane.plane = o.crtc->get_primary_plane();
 
-			if (!o.fbs.empty() && !o.primary_plane)
+			if (!o.primary_plane.fbs.empty() && !o.primary_plane.plane)
 				EXIT("Could not get primary plane for crtc '%u'", o.crtc->id());
 		}
 	}
