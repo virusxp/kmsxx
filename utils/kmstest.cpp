@@ -376,6 +376,12 @@ static vector<Arg> parse_cmdline(int argc, char **argv)
 	return args;
 }
 
+static void setup_default_connector(Card& card, OutputInfo& output)
+{
+	if (!output->connector)
+		get_default_connector(card, *output);
+}
+
 static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& output_args)
 {
 	vector<OutputInfo> outputs;
@@ -407,7 +413,11 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 			current_output = &outputs.back();
 
 			parse_connector(card, arg.arg, *current_output);
-			current_plane = 0;
+
+			// setup primary plane with default resolution
+			current_plane = &current_output->primary_plane;
+			current_plane->w = current_output->mode.hdisplay;
+			current_plane->h = current_output->mode.vdisplay;
 
 			break;
 		}
@@ -425,8 +435,6 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 			parse_crtc(card, arg.arg, *current_output);
 
 			current_output->user_set_crtc = true;
-
-			current_plane = 0;
 
 			break;
 		}
@@ -489,6 +497,7 @@ static vector<OutputInfo> setups_to_outputs(Card& card, const vector<Arg>& outpu
 
 	// create default framebuffers if needed
 	for (OutputInfo& o : outputs) {
+		// if user has defined connector, but nothing else
 		if (!o.crtc) {
 			get_default_crtc(card, *current_output);
 			o.user_set_crtc = true;
