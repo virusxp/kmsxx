@@ -150,6 +150,9 @@ static void draw_test_pattern_part(IMappedFramebuffer& fb, unsigned start_y, uns
 
 static void draw_test_pattern_impl(IMappedFramebuffer& fb)
 {
+	draw_test_pattern_part(fb, 0, fb.height());
+	return;
+
 	if (fb.height() < 20) {
 		draw_test_pattern_part(fb, 0, fb.height());
 		return;
