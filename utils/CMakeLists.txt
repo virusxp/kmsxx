@@ -14,7 +14,7 @@ add_executable (fbtest fbtest.cpp)
 target_link_libraries(fbtest kms++util)
 
 add_executable (kmscapture kmscapture.cpp)
-target_link_libraries(kmscapture kms++ kms++util ${LIBDRM_LIBRARIES})
+target_link_libraries(kmscapture kms++ kms++util ${LIBDRM_LIBRARIES} /home/tomba/work/ludev/src/cmem/api/libcmem.a libjpeg.so)
 
 add_executable (kmsblank kmsblank.cpp)
 target_link_libraries(kmsblank kms++ kms++util ${LIBDRM_LIBRARIES})

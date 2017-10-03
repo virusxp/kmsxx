@@ -8,9 +8,13 @@
 #include <sys/ioctl.h>
 #include <xf86drm.h>
 #include <glob.h>
+#include "jpeglib.h"
 
 #include <kms++/kms++.h>
 #include <kms++util/kms++util.h>
+
+#include "/home/tomba/work/ludev/include/ti/cmem.h"
+#include "/home/tomba/work/linux/include/uapi/linux/dma-buf.h"
 
 #define CAMERA_BUF_QUEUE_SIZE	3
 #define MAX_CAMERA		9
@@ -18,9 +22,38 @@
 using namespace std;
 using namespace kms;
 
+
+#define CMEM_BLOCKID CMEM_CMABLOCKID
+
+static CMEM_AllocParams cmem_alloc_params = {
+	CMEM_HEAP,	/* type */
+	CMEM_CACHED,	/* flags */
+	4		/* alignment */
+};
+
+int dmabuf_do_cache_operation(int dma_buf_fd, uint32_t cache_operation)
+{
+	struct dma_buf_sync sync { };
+	sync.flags = cache_operation;
+	return ioctl(dma_buf_fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+int dmabuf_cpu_start_read(int fd)
+{
+	return dmabuf_do_cache_operation(fd, (DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ));
+}
+
+int dmabuf_cpu_end_read(int fd)
+{
+	return dmabuf_do_cache_operation(fd, (DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ));
+}
+
+//CMEM_free(cmem_buffer, &cmem_alloc_params);
+
 enum class BufferProvider {
 	DRM,
 	V4L2,
+	CMEM,
 };
 
 class CameraPipeline
@@ -39,6 +72,7 @@ public:
 	void start_streaming();
 private:
 	ExtFramebuffer* GetExtFrameBuffer(Card& card, uint32_t i, PixelFormat pixfmt);
+	ExtFramebuffer* GetExtCMEMFrameBuffer(Card& card, PixelFormat pixfmt);
 	int m_fd;	/* camera file descriptor */
 	Crtc* m_crtc;
 	Plane* m_plane;
@@ -77,6 +111,31 @@ ExtFramebuffer* CameraPipeline::GetExtFrameBuffer(Card& card, uint32_t i, PixelF
 
 	const PixelFormatInfo& format_info = get_pixel_format_info(pixfmt);
 	ASSERT(format_info.num_planes == 1);
+
+	vector<int> fds { dmafd };
+	vector<uint32_t> pitches { m_in_width * (format_info.planes[0].bitspp / 8) };
+	vector<uint32_t> offsets { 0 };
+
+	return new ExtFramebuffer(card, m_in_width, m_in_height, pixfmt,
+				  fds, pitches, offsets);
+}
+
+ExtFramebuffer* CameraPipeline::GetExtCMEMFrameBuffer(Card& card, PixelFormat pixfmt)
+{
+	// XXX we never free cmem buffers
+
+	const PixelFormatInfo& format_info = get_pixel_format_info(pixfmt);
+	ASSERT(format_info.num_planes == 1);
+
+	uint32_t size = m_in_width * (format_info.planes[0].bitspp / 8) * m_in_height;
+
+	void* cmem_buf = CMEM_alloc2(CMEM_BLOCKID, size, &cmem_alloc_params);
+
+	ASSERT(cmem_buf);
+
+	int dmafd = CMEM_export_dmabuf(cmem_buf);
+
+	ASSERT(dmafd >= 0);
 
 	vector<int> fds { dmafd };
 	vector<uint32_t> pitches { m_in_width * (format_info.planes[0].bitspp / 8) };
@@ -172,14 +231,22 @@ CameraPipeline::CameraPipeline(int cam_fd, Card& card, Crtc *crtc, Plane* plane,
 	for (unsigned i = 0; i < CAMERA_BUF_QUEUE_SIZE; i++) {
 		Framebuffer *fb;
 
-		if (m_buffer_provider == BufferProvider::V4L2)
+		switch (m_buffer_provider) {
+		case BufferProvider::V4L2:
 			fb = GetExtFrameBuffer(card, i, pixfmt);
-		else
-			fb = new DumbFramebuffer(card, m_in_width,
-						 m_in_height, pixfmt);
+			break;
+		case BufferProvider::DRM:
+			fb = new DumbFramebuffer(card, m_in_width, m_in_height, pixfmt);
+			break;
+		case BufferProvider::CMEM:
+			fb = GetExtCMEMFrameBuffer(card, pixfmt);
+			break;
+		default:
+			ASSERT(0);
+		}
 
 		v4lbuf.index = i;
-		if (m_buffer_provider == BufferProvider::DRM)
+		if (m_buffer_provider != BufferProvider::V4L2)
 			v4lbuf.m.fd = fb->prime_fd(0);
 		r = ioctl(m_fd, VIDIOC_QBUF, &v4lbuf);
 		ASSERT(r == 0);
@@ -228,6 +295,106 @@ void CameraPipeline::start_streaming()
 	FAIL_IF(r, "Failed to enable camera stream: %d", r);
 }
 
+void save_jpeg(Framebuffer *fb)
+{
+	char filename[128];
+	const int quality = 90;
+	static int framen = 0;
+	static uint8_t* tmp = 0;
+
+	if (!tmp)
+		tmp = (uint8_t*)malloc(fb->width() * 3);
+
+	framen++;
+
+	if (framen != 20 && framen != 40)
+		return;
+
+
+	Stopwatch sw;
+	sw.start();
+
+	dmabuf_cpu_start_read(fb->prime_fd(0));
+
+	uint8_t* p = fb->map(0);
+
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+	FILE * outfile;		/* target file */
+	JSAMPROW row_pointer[1];	/* pointer to JSAMPLE row[s] */
+
+	/* Step 1: allocate and initialize JPEG compression object */
+
+	cinfo.err = jpeg_std_error(&jerr);
+	jpeg_create_compress(&cinfo);
+
+	/* Step 2: specify data destination (eg, a file) */
+
+	sprintf(filename, "captest-%d.jpg", framen);
+
+	if ((outfile = fopen(filename, "wb")) == NULL) {
+		fprintf(stderr, "can't open %s\n", filename);
+		exit(1);
+	}
+	jpeg_stdio_dest(&cinfo, outfile);
+
+	/* Step 3: set parameters for compression */
+	cinfo.image_width = fb->width(); 	/* image width and height, in pixels */
+	cinfo.image_height = fb->height();
+	cinfo.input_components = 3;		/* # of color components per pixel */
+	cinfo.in_color_space = JCS_YCbCr; 	/* colorspace of input image */
+
+	jpeg_set_defaults(&cinfo);
+
+	jpeg_set_quality(&cinfo, quality, TRUE /* limit to baseline-JPEG values */);
+
+	/* Step 4: Start compressor */
+
+	jpeg_start_compress(&cinfo, TRUE);
+
+	/* Step 5: while (scan lines remain to be written) */
+	/*           jpeg_write_scanlines(...); */
+
+	/* Here we use the library's state variable cinfo.next_scanline as the
+	  * loop counter, so that we don't have to keep track ourselves.
+	  * To keep things simple, we pass one scanline per call; you can pass
+	  * more if you wish, though.
+	  */
+
+	while (cinfo.next_scanline < cinfo.image_height) {
+		unsigned offset = cinfo.next_scanline * fb->stride(0);
+
+		for (unsigned i = 0, j = 0; i < cinfo.image_width * 2; i += 4, j += 6) {
+		    tmp[j + 0] = p[offset + i + 0]; // Y
+		    tmp[j + 1] = p[offset + i + 1]; // U
+		    tmp[j + 2] = p[offset + i + 3]; // V
+		    tmp[j + 3] = p[offset + i + 2]; // Y
+		    tmp[j + 4] = p[offset + i + 1]; // U
+		    tmp[j + 5] = p[offset + i + 3]; // V
+		}
+
+		//row_pointer[0] = p + cinfo.next_scanline * row_stride;
+		row_pointer[0] = tmp;
+
+		(void) jpeg_write_scanlines(&cinfo, row_pointer, 1);
+	}
+
+	/* Step 6: Finish compression */
+
+	jpeg_finish_compress(&cinfo);
+
+	fclose(outfile);
+
+	/* Step 7: release JPEG compression object */
+
+	jpeg_destroy_compress(&cinfo);
+
+	dmabuf_cpu_end_read(fb->prime_fd(0));
+
+	double us = sw.elapsed_us();
+	printf("Wrote %s in %u ms\n", filename, (unsigned)(us/1000));
+}
+
 void CameraPipeline::show_next_frame(AtomicReq& req)
 {
 	int r;
@@ -251,6 +418,8 @@ void CameraPipeline::show_next_frame(AtomicReq& req)
 
 	Framebuffer *fb = m_fb[fb_index];
 
+	save_jpeg(fb);
+
 	req.add(m_plane, "FB_ID", fb->id());
 
 	if (m_prev_fb_index >= 0) {
@@ -258,7 +427,7 @@ void CameraPipeline::show_next_frame(AtomicReq& req)
 		v4l2buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 		v4l2buf.memory = v4l_mem;
 		v4l2buf.index = m_prev_fb_index;
-		if (m_buffer_provider == BufferProvider::DRM)
+		if (m_buffer_provider != BufferProvider::V4L2)
 			v4l2buf.m.fd = m_fb[m_prev_fb_index]->prime_fd(0);
 		r = ioctl(m_fd, VIDIOC_QBUF, &v4l2buf);
 		ASSERT(r == 0);
@@ -295,9 +464,13 @@ static const char* usage_str =
 		"  -h, --help                  Print this help\n"
 		;
 
+
 int main(int argc, char** argv)
 {
-	BufferProvider buffer_provider = BufferProvider::DRM;
+	//test();
+	//return 0;
+
+	BufferProvider buffer_provider = BufferProvider::CMEM;
 	bool single_cam = false;
 
 	OptionSet optionset = {
@@ -308,11 +481,13 @@ int main(int argc, char** argv)
 		Option("|buffer-type=", [&](string s)
 		{
 			if (s == "v4l")
-				buffer_provider = BufferProvider::V4L2;
+			buffer_provider = BufferProvider::V4L2;
 			else if (s == "drm")
-				buffer_provider = BufferProvider::DRM;
+			buffer_provider = BufferProvider::DRM;
+			else if (s == "cmem")
+			buffer_provider = BufferProvider::CMEM;
 			else
-				FAIL("Invalid buffer provider: %s", s.c_str());
+			FAIL("Invalid buffer provider: %s", s.c_str());
 		}),
 		Option("h|help", [&]()
 		{
@@ -328,6 +503,9 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 
+	if (buffer_provider == BufferProvider::CMEM)
+		CMEM_init();
+
 	auto pixfmt = PixelFormat::YUYV;
 
 	Card card;
@@ -335,7 +513,7 @@ int main(int argc, char** argv)
 	auto conn = card.get_first_connected_connector();
 	auto crtc = conn->get_current_crtc();
 	printf("Display: %dx%d\n", crtc->width(), crtc->height());
-	printf("Buffer provider: %s\n", buffer_provider == BufferProvider::V4L2? "V4L" : "DRM");
+	printf("Buffer provider: %s\n", buffer_provider == BufferProvider::V4L2? "V4L" : (buffer_provider == BufferProvider::DRM ? "DRM" : "CMEM"));
 
 	vector<int> camera_fds;
 
