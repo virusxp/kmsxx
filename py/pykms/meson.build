@@ -1,11 +1,4 @@
-pymod = import('python')
-py3_inst = pymod.find_installation('python3', required : get_option('pykms'))
-
-if py3_inst.found() == false
-    subdir_done()
-endif
-
-py3_dep = py3_inst.dependency()
+py3_dep = dependency('python3', required : get_option('pykms'))
 
 if py3_dep.found() == false
     subdir_done()
@@ -34,14 +27,16 @@ includes = [
     '../../ext/pybind11/include',
 ]
 
-pykms = py3_inst.extension_module('pykms',
-                                  pykms_sources,
-                                  install : true,
-                                  subdir : 'pykms',
-                                  include_directories : includes,
-                                  dependencies : pykms_deps)
+destdir = get_option('libdir') / 'python' + py3_dep.version() / 'site-packages/pykms'
+
+pykms = shared_module('pykms',
+                      pykms_sources,
+                      install : true,
+                      install_dir : destdir,
+                      name_prefix : '',
+                      include_directories : includes,
+                      dependencies : pykms_deps)
 
 # Copy __init__.py to build dir so that we can run without installing
-configure_file(input: '__init__.py', output: '__init__.py', copy: true)
-
-py3_inst.install_sources('__init__.py', subdir : 'pykms', pure : false)
+configure_file(input: '__init__.py', output: '__init__.py', copy: true,
+               install : true, install_dir : destdir)
