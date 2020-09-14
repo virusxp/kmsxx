@@ -21,10 +21,7 @@ pykms_deps = [
     libkmsxx_dep,
     libkmsxxutil_dep,
     py3_dep,
-]
-
-includes = [
-    '../../ext/pybind11/include',
+    pybind11_dep,
 ]
 
 destdir = get_option('libdir') / 'python' + py3_dep.version() / 'site-packages/pykms'
@@ -34,7 +31,6 @@ pykms = shared_module('pykms',
                       install : true,
                       install_dir : destdir,
                       name_prefix : '',
-                      include_directories : includes,
                       dependencies : pykms_deps)
 
 # Copy __init__.py to build dir so that we can run without installing

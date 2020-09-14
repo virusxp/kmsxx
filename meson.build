@@ -8,6 +8,9 @@ libfmt_includes = include_directories('ext/fmt/include')
 libfmt_dep = declare_dependency(include_directories : libfmt_includes,
                                 compile_args : '-DFMT_HEADER_ONLY')
 
+pybind11_includes = include_directories('ext/pybind11/include')
+pybind11_dep = declare_dependency(include_directories : pybind11_includes)
+
 libdrmomap_dep = dependency('libdrm_omap', required : get_option('omap'))
 
 subdir('kms++')
@@ -18,4 +21,3 @@ subdir('py')
 if get_option('kmscube')
     subdir('kmscube')
 endif
-
