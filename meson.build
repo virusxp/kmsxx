@@ -5,6 +5,7 @@ project('kms++', 'cpp',
 )
 
 cpp = meson.get_compiler('cpp')
+cpp_arguments = []
 
 if cpp.get_id() == 'gcc'
     if (host_machine.cpu_family() == 'arm' and
@@ -21,6 +22,8 @@ if cpp.has_argument('-Wno-c99-designator')
         '-Wno-c99-designator',
     ]
 endif
+
+add_project_arguments(cpp_arguments, language : 'cpp')
 
 libfmt_includes = include_directories('ext/fmt/include')
 libfmt_dep = declare_dependency(include_directories : libfmt_includes,
