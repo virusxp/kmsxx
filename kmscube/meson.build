@@ -6,7 +6,7 @@ kmscube_sources = files([
     'cube-null.cpp',
     'cube-wl.cpp',
     'cube-x11.cpp',
-    'esTransform.c',
+    'esTransform.cpp',
 ])
 
 kmscube_deps = [
