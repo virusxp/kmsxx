@@ -7,14 +7,12 @@ project('kms++', 'cpp',
 cpp = meson.get_compiler('cpp')
 cpp_arguments = []
 
-if cpp.get_id() == 'gcc'
-    if (host_machine.cpu_family() == 'arm' and
-        cpp.version().version_compare('>=7.1') and
-        cpp.version().version_compare('<9'))
-        cpp_arguments += [
-            '-Wno-psabi',
-        ]
-    endif
+if (cpp.get_id() == 'gcc' and
+    host_machine.cpu_family() == 'arm' and
+    cpp.has_argument('-Wno-psabi'))
+    cpp_arguments += [
+        '-Wno-psabi',
+    ]
 endif
 
 if cpp.has_argument('-Wno-c99-designator')
